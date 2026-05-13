@@ -4,7 +4,7 @@ import re
 from email.header import decode_header
 from email.message import Message
 
-from octobell.enums import NotificationReason
+from octobell.enums import NotificationReason, event_type_from_action_text
 from octobell.models import GitHubEmail
 
 logger = logging.getLogger(__name__)
@@ -19,6 +19,10 @@ _LIST_ID_PATTERN = re.compile(
 
 _GITHUB_URL_PATTERN = re.compile(
     r"https://github\.com/[^\s\]>)\"']+"
+)
+
+_ACTION_PATTERN = re.compile(
+    r"^@?\S+\s+(.+?)\s*(?:\([\w/]+#\d+\))?\s*[.:]?\s*$"
 )
 
 
@@ -46,6 +50,10 @@ class EmailParser:
             if issue_number is not None:
                 web_url += f"/pull/{issue_number}"
 
+        action_text = self._extract_action_from_body(body_bytes)
+        body_str = body_bytes.decode("utf-8", errors="replace") if body_bytes else None
+        event_type = event_type_from_action_text(action_text, body_str)
+
         return GitHubEmail(
             uid=uid,
             message_id=message_id,
@@ -56,10 +64,13 @@ class EmailParser:
             subject_title=subject_title,
             issue_number=issue_number,
             web_url=web_url,
+            action_text=action_text,
+            event_type=event_type,
         )
 
     def _decode_subject(self, raw_subject: str) -> str:
-        decoded_parts = decode_header(raw_subject)
+        unfolded = re.sub(r"\r?\n\s+", " ", raw_subject)
+        decoded_parts = decode_header(unfolded)
         return "".join(
             part.decode(charset or "utf-8") if isinstance(part, bytes) else part
             for part, charset in decoded_parts
@@ -83,6 +94,19 @@ class EmailParser:
             return None
         # Last URL is typically the "View it on GitHub" link
         return urls[-1]
+
+    def _extract_action_from_body(self, body_bytes: bytes) -> str | None:
+        if not body_bytes:
+            return None
+        try:
+            body = body_bytes.decode("utf-8", errors="replace")
+        except Exception:
+            return None
+        first_line = body.strip().split("\n", 1)[0].strip()
+        match = _ACTION_PATTERN.match(first_line)
+        if match:
+            return match.group(1)
+        return None
 
     def _parse_subject(self, subject: str) -> tuple[str, int | None]:
         match = _SUBJECT_PATTERN.match(subject)

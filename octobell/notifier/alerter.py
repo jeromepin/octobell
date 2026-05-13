@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 CLOSE_LABEL: Final[str] = "Dismiss"
 TIMEOUT_SECONDS: Final[int] = 10
+APP_ICON: Final[str] = "https://github.githubassets.com/favicons/favicon.png"
 
 
 @dataclass
@@ -29,6 +30,7 @@ class AlerterNotifier(Notifier):
             "--title", notification.title,
             "--subtitle", notification.subtitle,
             "--message", notification.message,
+            "--app-icon", APP_ICON,
             "--close-label", CLOSE_LABEL,
             "--timeout", str(TIMEOUT_SECONDS),
             "--json",

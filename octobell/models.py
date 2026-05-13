@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from octobell.enums import NotificationReason
+from octobell.enums import EventType, NotificationReason
 
 
 @dataclass(frozen=True)
@@ -14,6 +14,8 @@ class GitHubEmail:
     subject_title: str
     issue_number: int | None
     web_url: str
+    action_text: str | None = None
+    event_type: EventType | None = None
 
     @property
     def repo_full_name(self) -> str:

@@ -3,15 +3,16 @@ import signal
 import threading
 
 from octobell.browser import open_browser
-from octobell.config import Config
+from octobell.config import AccountConfig
 from octobell.email_parser import EmailParser
 from octobell.enums import NativeNotificationOutcome, NotificationReason
 from octobell.imap_client import IMAPIdleClient
 from octobell.models import GitHubEmail, NativeNotification
 from octobell.notifier import get_notifier
 from octobell.notifier.base import Notifier
-from octobell.rules import Action, RulesConfig
+from octobell.rules import Action
 
+TRACE = 5
 logger = logging.getLogger(__name__)
 
 REASON_TEXT = {
@@ -44,23 +45,26 @@ class FolderWatcher:
     def __init__(
         self,
         folder: str,
-        config: Config,
+        account: AccountConfig,
         parser: EmailParser,
         notifier: Notifier,
-        rules: RulesConfig,
         shutdown: threading.Event,
     ) -> None:
         self._folder = folder
-        self._config = config
-        self._imap = IMAPIdleClient(config)
+        self._account = account
+        self._imap = IMAPIdleClient(account)
         self._parser = parser
         self._notifier = notifier
-        self._rules = rules
+        self._rules = account.rules
         self._shutdown = shutdown
         self._backoff_seconds = 1
 
+    @property
+    def _prefix(self) -> str:
+        return f"{self._account.name}/{self._folder}"
+
     def run(self) -> None:
-        logger.info(f"[{self._folder}] Watcher started")
+        logger.info(f"[{self._prefix}] Watcher started")
 
         while not self._shutdown.is_set():
             try:
@@ -72,21 +76,21 @@ class FolderWatcher:
                 self._idle_loop()
 
             except Exception as e:
-                logger.error(f"[{self._folder}] IMAP error: {e}", exc_info=True)
+                logger.error(f"[{self._prefix}] IMAP error: {e}", exc_info=True)
                 self._imap.disconnect()
 
                 if self._shutdown.is_set():
                     break
 
-                logger.info(f"[{self._folder}] Reconnecting in {self._backoff_seconds}s...")
+                logger.info(f"[{self._prefix}] Reconnecting in {self._backoff_seconds}s...")
                 self._shutdown.wait(timeout=self._backoff_seconds)
                 self._backoff_seconds = min(
                     self._backoff_seconds * 2,
-                    self._config.reconnect_max_backoff_seconds,
+                    self._account.reconnect_max_backoff_seconds,
                 )
 
         self._imap.disconnect()
-        logger.info(f"[{self._folder}] Watcher stopped")
+        logger.info(f"[{self._prefix}] Watcher stopped")
 
     def _idle_loop(self) -> None:
         poll_interval = 10
@@ -97,7 +101,7 @@ class FolderWatcher:
                 elapsed = 0
                 all_responses = []
 
-                while elapsed < self._config.idle_timeout_seconds:
+                while elapsed < self._account.idle_timeout_seconds:
                     if self._shutdown.is_set():
                         break
                     responses = self._imap.idle_check(timeout=poll_interval)
@@ -112,7 +116,7 @@ class FolderWatcher:
                 break
 
             if all_responses:
-                logger.debug(f"[{self._folder}] IDLE responses: {all_responses!r}")
+                logger.log(TRACE, f"[{self._prefix}] IDLE responses: {all_responses!r}")
 
             if _responses_contain_activity(all_responses):
                 self._process_unseen()
@@ -129,11 +133,11 @@ class FolderWatcher:
         action = self._rules.evaluate(email)
 
         if action == Action.SKIP:
-            logger.info(f"[{self._folder}] Skipped: {email.sender} {email.reason.value} on {email.repo_full_name}: {email.subject_title}")
+            logger.info(f"[{self._prefix}] Skipped: {email.sender} {email.reason.value} on {email.repo_full_name}: {email.subject_title}")
             self._imap.mark_seen(email.uid)
             return
 
-        logger.info(f"[{self._folder}] {email.sender} {email.reason.value} on {email.repo_full_name}: {email.subject_title}")
+        logger.info(f"[{self._prefix}] {email.sender} {email.reason.value} on {email.repo_full_name}: {email.subject_title}")
 
         notification = NativeNotification(
             title="GitHub",
@@ -150,43 +154,45 @@ class FolderWatcher:
         self._imap.mark_seen(email.uid)
 
     def _build_subtitle(self, email: GitHubEmail) -> str:
+        if email.action_text:
+            return f"{email.sender} {email.action_text} on {email.repo_full_name}"
         action = REASON_TEXT.get(email.reason, "notification")
         return f"{email.sender} {action} on {email.repo_full_name}"
 
 
 class Daemon:
-    def __init__(self, config: Config) -> None:
-        self._config = config
+    def __init__(self, accounts: list[AccountConfig]) -> None:
+        self._accounts = accounts
         self._parser = EmailParser()
         self._notifier: Notifier = get_notifier()
-        self._rules = RulesConfig.load(config.rules_path)
         self._shutdown = threading.Event()
 
     def run(self) -> None:
         self._install_signal_handlers()
-        folders = self._config.imap_folders
-        logger.info(f"Starting octobell (notifier: {type(self._notifier).__name__}, folders: {', '.join(folders)})")
 
-        watchers = []
+        account_summary = ", ".join(f"{a.name} ({a.imap_user})" for a in self._accounts)
+        logger.info(f"Starting octobell (notifier: {type(self._notifier).__name__}, accounts: {account_summary})")
+
+        self._list_available_folders()
+
         threads = []
 
-        for folder in folders:
-            watcher = FolderWatcher(
-                folder=folder,
-                config=self._config,
-                parser=self._parser,
-                notifier=self._notifier,
-                rules=self._rules,
-                shutdown=self._shutdown,
-            )
-            watchers.append(watcher)
-            thread = threading.Thread(
-                target=watcher.run,
-                name=f"watcher-{folder}",
-                daemon=True,
-            )
-            threads.append(thread)
-            thread.start()
+        for account in self._accounts:
+            for folder in account.imap_folders:
+                watcher = FolderWatcher(
+                    folder=folder,
+                    account=account,
+                    parser=self._parser,
+                    notifier=self._notifier,
+                    shutdown=self._shutdown,
+                )
+                thread = threading.Thread(
+                    target=watcher.run,
+                    name=f"watcher-{account.name}-{folder}",
+                    daemon=True,
+                )
+                threads.append(thread)
+                thread.start()
 
         self._shutdown.wait()
 
@@ -194,6 +200,24 @@ class Daemon:
             thread.join(timeout=15)
 
         logger.info("Daemon stopped")
+
+    def _list_available_folders(self) -> None:
+        for account in self._accounts:
+            client = IMAPIdleClient(account)
+            try:
+                client.connect()
+                folders = client.list_folders()
+                watched = set(account.imap_folders)
+                logger.info(f"[{account.name}] Available IMAP folders:")
+                for name, delimiter in sorted(folders, key=lambda f: f[0]):
+                    depth = name.count(delimiter) if delimiter else 0
+                    indent = "  " * depth
+                    marker = "*" if name in watched else " "
+                    logger.info(f"  {marker} {indent}{name}")
+            except Exception as e:
+                logger.warning(f"[{account.name}] Could not list folders: {e}")
+            finally:
+                client.disconnect()
 
     def _install_signal_handlers(self) -> None:
         for sig in (signal.SIGTERM, signal.SIGINT):
