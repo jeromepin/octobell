@@ -1,0 +1,17 @@
+[project]
+name = "octobell"
+version = "0.1.0"
+description = "GitHub notification daemon using IMAP IDLE"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "imapclient>=3.0.0",
+    "pyyaml>=6.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+octobell = "octobell.__main__:main"
