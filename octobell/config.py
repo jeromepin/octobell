@@ -23,6 +23,8 @@ class AccountConfig:
     idle_timeout_seconds: int = 28 * 60
     reconnect_max_backoff_seconds: int = 300
     notification_timeout_seconds: int = 10
+    notification_subtitle_format: str = "{sender} {action} on {repo}"
+    notification_message_format: str = "{title}"
     rules: RulesConfig = None
 
     def __post_init__(self):
@@ -72,7 +74,7 @@ class AccountConfig:
         if unknown_imap_keys:
             logger.warning(f"{path.name}: unknown key(s) in 'imap': {', '.join(sorted(unknown_imap_keys))}")
 
-        unknown_top_keys = set(data.keys()) - {"imap", "rules"}
+        unknown_top_keys = set(data.keys()) - {"imap", "rules", "notification"}
         if unknown_top_keys:
             logger.warning(f"{path.name}: unknown top-level key(s): {', '.join(sorted(unknown_top_keys))}")
 
@@ -81,6 +83,17 @@ class AccountConfig:
             raise ValueError(f"{path.name}: 'rules' must be a mapping, got {type(rules_data).__name__}")
 
         rules = RulesConfig.from_dict(rules_data)
+
+        notification_data = data.get("notification", {})
+        if notification_data and not isinstance(notification_data, dict):
+            raise ValueError(f"{path.name}: 'notification' must be a mapping, got {type(notification_data).__name__}")
+        notification_fields = notification_data or {}
+        subtitle_format = notification_fields.get("subtitle", "{sender} {action} on {repo}")
+        if not isinstance(subtitle_format, str) or not subtitle_format.strip():
+            raise ValueError(f"{path.name}: 'notification.subtitle' must be a non-empty string")
+        message_format = notification_fields.get("message", "{title}")
+        if not isinstance(message_format, str) or not message_format.strip():
+            raise ValueError(f"{path.name}: 'notification.message' must be a non-empty string")
 
         logger.info(f"  account: {path.stem}")
         logger.info(f"  imap: {imap['host']}:{port} as {imap['user']}")
@@ -94,6 +107,8 @@ class AccountConfig:
             imap_user=imap["user"],
             imap_password=imap["password"],
             imap_folders=folders,
+            notification_subtitle_format=subtitle_format,
+            notification_message_format=message_format,
             rules=rules,
         )
 
@@ -177,6 +192,20 @@ imap:
 #   2. orgs.<org>.match         (org-level)
 #   3. default                  (global)
 #   4. implicit notify          (if nothing matches)
+
+# Notification display settings.
+# Both subtitle and message support these template variables:
+#   {sender}     — GitHub username
+#   {action}     — action text (e.g. "commented", "requested your review")
+#   {title}      — PR/issue title
+#   {repo}       — full repo name (owner/name)
+#   {repo_owner} — repo owner
+#   {repo_name}  — repo name
+#   {reason}     — raw reason (e.g. review_requested, comment)
+#
+# notification:
+#   subtitle: "{sender} {action} on {repo}"
+#   message: "{title}"
 
 rules:
   default: []

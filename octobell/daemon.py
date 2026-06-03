@@ -139,10 +139,11 @@ class FolderWatcher:
 
         logger.info(f"[{self._prefix}] {email.sender} {email.reason.value} on {email.repo_full_name}: {email.subject_title}")
 
+        template_vars = self._template_vars(email)
         notification = NativeNotification(
             title="GitHub",
-            subtitle=self._build_subtitle(email),
-            message=email.subject_title,
+            subtitle=self._account.notification_subtitle_format.format_map(template_vars),
+            message=self._account.notification_message_format.format_map(template_vars),
             on_trigger_url=email.web_url,
         )
 
@@ -153,11 +154,16 @@ class FolderWatcher:
 
         self._imap.mark_seen(email.uid)
 
-    def _build_subtitle(self, email: GitHubEmail) -> str:
-        if email.action_text:
-            return f"{email.sender} {email.action_text} on {email.repo_full_name}"
-        action = REASON_TEXT.get(email.reason, "notification")
-        return f"{email.sender} {action} on {email.repo_full_name}"
+    def _template_vars(self, email: GitHubEmail) -> dict[str, str]:
+        return {
+            "sender": email.sender,
+            "action": email.action_text or REASON_TEXT.get(email.reason, "notification"),
+            "repo": email.repo_full_name,
+            "repo_owner": email.repo_owner,
+            "repo_name": email.repo_name,
+            "reason": email.reason.value,
+            "title": email.subject_title,
+        }
 
 
 class Daemon:
