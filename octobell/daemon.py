@@ -133,11 +133,16 @@ class FolderWatcher:
         action = self._rules.evaluate(email)
 
         if action == Action.SKIP:
-            logger.info(f"[{self._prefix}] Skipped: {email.sender} {email.reason.value} on {email.repo_full_name}: {email.subject_title}")
+            logger.info(
+                f"[{self._prefix}] Skipped: {email.sender} {email.reason.value}"
+                f" on {email.repo_full_name}: {email.subject_title}"
+            )
             self._imap.mark_seen(email.uid)
             return
 
-        logger.info(f"[{self._prefix}] {email.sender} {email.reason.value} on {email.repo_full_name}: {email.subject_title}")
+        logger.info(
+            f"[{self._prefix}] {email.sender} {email.reason.value} on {email.repo_full_name}: {email.subject_title}"
+        )
 
         template_vars = self._template_vars(email)
         notification = NativeNotification(

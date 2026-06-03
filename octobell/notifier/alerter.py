@@ -27,12 +27,18 @@ class AlerterNotifier(Notifier):
     def notify(self, notification: NativeNotification) -> NativeNotificationOutcome:
         args = [
             self.CMD,
-            "--title", notification.title,
-            "--subtitle", notification.subtitle,
-            "--message", notification.message,
-            "--app-icon", APP_ICON,
-            "--close-label", CLOSE_LABEL,
-            "--timeout", str(TIMEOUT_SECONDS),
+            "--title",
+            notification.title,
+            "--subtitle",
+            notification.subtitle,
+            "--message",
+            notification.message,
+            "--app-icon",
+            APP_ICON,
+            "--close-label",
+            CLOSE_LABEL,
+            "--timeout",
+            str(TIMEOUT_SECONDS),
             "--json",
         ]
 
@@ -43,13 +49,13 @@ class AlerterNotifier(Notifier):
         try:
             result = json.loads(process.stdout.strip())
         except (json.JSONDecodeError, ValueError):
-            logger.error(f"Failed to parse alerter output: exit={process.returncode} stdout={process.stdout!r} stderr={process.stderr!r}")
+            logger.error(
+                f"Failed to parse alerter output: exit={process.returncode}"
+                f" stdout={process.stdout!r} stderr={process.stderr!r}"
+            )
             return NativeNotificationOutcome.ERROR
 
-        if (
-            result.get("activationType") == "closed"
-            and result.get("activationValue") == CLOSE_LABEL
-        ):
+        if result.get("activationType") == "closed" and result.get("activationValue") == CLOSE_LABEL:
             return NativeNotificationOutcome.DISMISS
         elif result.get("activationType") == "contentsClicked":
             return NativeNotificationOutcome.OPEN_URL

@@ -1,6 +1,6 @@
 import logging
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -13,15 +13,33 @@ logger = logging.getLogger(__name__)
 CONFIG_DIR = Path.home() / ".config" / "octobell"
 
 _REASONS = [
-    "assign", "author", "comment", "invitation", "manual", "mention",
-    "review_requested", "security_alert", "state_change", "subscribed",
-    "team_mention", "ci_activity", "unknown",
+    "assign",
+    "author",
+    "comment",
+    "invitation",
+    "manual",
+    "mention",
+    "review_requested",
+    "security_alert",
+    "state_change",
+    "subscribed",
+    "team_mention",
+    "ci_activity",
+    "unknown",
 ]
 
 _EVENTS = [
-    "comment", "approved", "changes_requested", "merged", "closed",
-    "reopened", "push", "review_dismissed", "pr_opened",
-    "review_requested", "unknown",
+    "comment",
+    "approved",
+    "changes_requested",
+    "merged",
+    "closed",
+    "reopened",
+    "push",
+    "review_dismissed",
+    "pr_opened",
+    "review_requested",
+    "unknown",
 ]
 
 _RULE_SCHEMA = {
@@ -114,11 +132,7 @@ class AccountConfig:
     notification_timeout_seconds: int = 10
     notification_subtitle_format: str = "{sender} {action} on {repo}"
     notification_message_format: str = "{title}"
-    rules: RulesConfig = None
-
-    def __post_init__(self):
-        if self.rules is None:
-            object.__setattr__(self, "rules", RulesConfig.empty())
+    rules: RulesConfig = field(default_factory=RulesConfig.empty)
 
     @classmethod
     def from_yaml(cls, path: Path) -> "AccountConfig":
@@ -133,7 +147,9 @@ class AccountConfig:
         try:
             validate(data, _CONFIG_SCHEMA)
         except ValidationError as e:
-            raise ValueError(f"{path.name}: {e.message} (at {'.'.join(str(p) for p in e.absolute_path) or 'root'})") from e
+            raise ValueError(
+                f"{path.name}: {e.message} (at {'.'.join(str(p) for p in e.absolute_path) or 'root'})"
+            ) from e
 
         imap = data["imap"]
         port = imap.get("port", 993)

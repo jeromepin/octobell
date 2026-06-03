@@ -1,9 +1,9 @@
 import platform
-from enum import Enum, auto, unique
+from enum import Enum, StrEnum, auto, unique
 
 
 @unique
-class NotificationReason(str, Enum):
+class NotificationReason(StrEnum):
     ASSIGN = "assign"
     AUTHOR = "author"
     COMMENT = "comment"
@@ -24,7 +24,7 @@ class NotificationReason(str, Enum):
 
 
 @unique
-class EventType(str, Enum):
+class EventType(StrEnum):
     COMMENT = "comment"
     APPROVED = "approved"
     CHANGES_REQUESTED = "changes_requested"

@@ -1,12 +1,12 @@
 from dataclasses import dataclass, field
-from enum import Enum, unique
+from enum import StrEnum, unique
 
 from octobell.enums import EventType, NotificationReason
 from octobell.models import GitHubEmail
 
 
 @unique
-class Action(str, Enum):
+class Action(StrEnum):
     NOTIFY = "notify"
     SKIP = "skip"
 
@@ -64,8 +64,7 @@ class RulesConfig:
             repos_data = org_data.get("repos", {})
             if repos_data:
                 repo_rules[org_name] = {
-                    repo_name: _parse_rules(repo_data)
-                    for repo_name, repo_data in repos_data.items()
+                    repo_name: _parse_rules(repo_data) for repo_name, repo_data in repos_data.items()
                 }
 
         return cls(

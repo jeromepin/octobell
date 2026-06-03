@@ -13,17 +13,11 @@ _SUBJECT_PATTERN = re.compile(
     r"^(?:Re:\s*)?\[(?P<repo>[^\]]+)\]\s+(?P<title>.+?)(?:\s+\((?:PR )?#(?P<number>\d+)\))?\s*$"
 )
 
-_LIST_ID_PATTERN = re.compile(
-    r"<(?P<repo>[^.]+)\.(?P<owner>[^.]+)\.github\.com>"
-)
+_LIST_ID_PATTERN = re.compile(r"<(?P<repo>[^.]+)\.(?P<owner>[^.]+)\.github\.com>")
 
-_GITHUB_URL_PATTERN = re.compile(
-    r"https://github\.com/[^\s\]>)\"']+"
-)
+_GITHUB_URL_PATTERN = re.compile(r"https://github\.com/[^\s\]>)\"']+")
 
-_ACTION_PATTERN = re.compile(
-    r"^@?\S+\s+(.+?)\s*(?:\([\w/]+#\d+\))?\s*[.:]?\s*$"
-)
+_ACTION_PATTERN = re.compile(r"^@?\S+\s+(.+?)\s*(?:\([\w/]+#\d+\))?\s*[.:]?\s*$")
 
 
 class EmailParser:
@@ -72,8 +66,7 @@ class EmailParser:
         unfolded = re.sub(r"\r?\n\s+", " ", raw_subject)
         decoded_parts = decode_header(unfolded)
         return "".join(
-            part.decode(charset or "utf-8") if isinstance(part, bytes) else part
-            for part, charset in decoded_parts
+            part.decode(charset or "utf-8") if isinstance(part, bytes) else part for part, charset in decoded_parts
         )
 
     def _parse_list_id(self, list_id: str) -> tuple[str, str]:
