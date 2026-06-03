@@ -4,12 +4,101 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
+from jsonschema import ValidationError, validate
 
 from octobell.rules import RulesConfig
 
 logger = logging.getLogger(__name__)
 
 CONFIG_DIR = Path.home() / ".config" / "octobell"
+
+_REASONS = [
+    "assign", "author", "comment", "invitation", "manual", "mention",
+    "review_requested", "security_alert", "state_change", "subscribed",
+    "team_mention", "ci_activity", "unknown",
+]
+
+_EVENTS = [
+    "comment", "approved", "changes_requested", "merged", "closed",
+    "reopened", "push", "review_dismissed", "pr_opened",
+    "review_requested", "unknown",
+]
+
+_RULE_SCHEMA = {
+    "type": "object",
+    "required": ["reason"],
+    "additionalProperties": False,
+    "properties": {
+        "reason": {"type": "string", "enum": _REASONS},
+        "action": {"type": "string", "enum": ["notify", "skip"]},
+        "event": {"type": "string", "enum": _EVENTS},
+    },
+}
+
+_ORG_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "match": {
+            "type": "array",
+            "items": _RULE_SCHEMA,
+        },
+        "repos": {
+            "type": "object",
+            "additionalProperties": {
+                "type": "array",
+                "items": _RULE_SCHEMA,
+            },
+        },
+    },
+}
+
+_CONFIG_SCHEMA = {
+    "type": "object",
+    "required": ["imap"],
+    "additionalProperties": False,
+    "properties": {
+        "imap": {
+            "type": "object",
+            "required": ["host", "user", "password"],
+            "additionalProperties": False,
+            "properties": {
+                "host": {"type": "string", "minLength": 1},
+                "user": {"type": "string", "minLength": 1},
+                "password": {"type": "string", "minLength": 1},
+                "port": {"type": "integer", "minimum": 1},
+                "folders": {
+                    "oneOf": [
+                        {"type": "string", "minLength": 1},
+                        {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1},
+                    ],
+                },
+            },
+        },
+        "notification": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "subtitle": {"type": "string", "minLength": 1},
+                "message": {"type": "string", "minLength": 1},
+            },
+        },
+        "rules": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "default": {
+                    "type": "array",
+                    "items": _RULE_SCHEMA,
+                },
+                "orgs": {
+                    "type": "object",
+                    "additionalProperties": _ORG_SCHEMA,
+                },
+            },
+        },
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -41,59 +130,24 @@ class AccountConfig:
         except yaml.YAMLError as e:
             raise ValueError(f"{path.name}: invalid YAML: {e}") from e
 
-        if not isinstance(data, dict):
-            raise ValueError(f"{path.name}: expected a YAML mapping, got {type(data).__name__}")
-
-        if "imap" not in data:
-            raise ValueError(f"{path.name}: missing 'imap' section")
+        try:
+            validate(data, _CONFIG_SCHEMA)
+        except ValidationError as e:
+            raise ValueError(f"{path.name}: {e.message} (at {'.'.join(str(p) for p in e.absolute_path) or 'root'})") from e
 
         imap = data["imap"]
-        if not isinstance(imap, dict):
-            raise ValueError(f"{path.name}: 'imap' must be a mapping, got {type(imap).__name__}")
-
-        for key in ("host", "user", "password"):
-            if key not in imap:
-                raise ValueError(f"{path.name}: missing required field 'imap.{key}'")
-            if not isinstance(imap[key], str) or not imap[key].strip():
-                raise ValueError(f"{path.name}: 'imap.{key}' must be a non-empty string")
-
         port = imap.get("port", 993)
-        if not isinstance(port, int) or port <= 0:
-            raise ValueError(f"{path.name}: 'imap.port' must be a positive integer, got {port!r}")
 
         folders_raw = imap.get("folders", ["INBOX"])
         if isinstance(folders_raw, str):
             folders_raw = [folders_raw]
-        if not isinstance(folders_raw, list):
-            raise ValueError(f"{path.name}: 'imap.folders' must be a string or list, got {type(folders_raw).__name__}")
-        folders = tuple(f.strip() for f in folders_raw if isinstance(f, str) and f.strip())
-        if not folders:
-            raise ValueError(f"{path.name}: 'imap.folders' must contain at least one folder")
+        folders = tuple(folders_raw)
 
-        unknown_imap_keys = set(imap.keys()) - {"host", "port", "user", "password", "folders"}
-        if unknown_imap_keys:
-            logger.warning(f"{path.name}: unknown key(s) in 'imap': {', '.join(sorted(unknown_imap_keys))}")
+        rules = RulesConfig.from_dict(data.get("rules", {}))
 
-        unknown_top_keys = set(data.keys()) - {"imap", "rules", "notification"}
-        if unknown_top_keys:
-            logger.warning(f"{path.name}: unknown top-level key(s): {', '.join(sorted(unknown_top_keys))}")
-
-        rules_data = data.get("rules", {})
-        if rules_data and not isinstance(rules_data, dict):
-            raise ValueError(f"{path.name}: 'rules' must be a mapping, got {type(rules_data).__name__}")
-
-        rules = RulesConfig.from_dict(rules_data)
-
-        notification_data = data.get("notification", {})
-        if notification_data and not isinstance(notification_data, dict):
-            raise ValueError(f"{path.name}: 'notification' must be a mapping, got {type(notification_data).__name__}")
-        notification_fields = notification_data or {}
-        subtitle_format = notification_fields.get("subtitle", "{sender} {action} on {repo}")
-        if not isinstance(subtitle_format, str) or not subtitle_format.strip():
-            raise ValueError(f"{path.name}: 'notification.subtitle' must be a non-empty string")
-        message_format = notification_fields.get("message", "{title}")
-        if not isinstance(message_format, str) or not message_format.strip():
-            raise ValueError(f"{path.name}: 'notification.message' must be a non-empty string")
+        notification = data.get("notification", {})
+        subtitle_format = notification.get("subtitle", "{sender} {action} on {repo}")
+        message_format = notification.get("message", "{title}")
 
         logger.info(f"  account: {path.stem}")
         logger.info(f"  imap: {imap['host']}:{port} as {imap['user']}")
